@@ -1,0 +1,108 @@
+groups:
+
+  # ── Recording rules ──────────────────────────────────────────────────────────
+  - name: api_recording
+    interval: 30s
+    rules:
+      - record: job:http_requests:rate1m
+        expr: sum by(job, handler, status) (rate(http_requests_total[1m]))
+
+      - record: job:http_request_duration_seconds:p95_5m
+        expr: |
+          histogram_quantile(0.95,
+            sum by(job, le) (rate(http_request_duration_seconds_bucket[5m]))
+          )
+
+      - record: job:http_error_rate:ratio5m
+        expr: |
+          sum by(job) (rate(http_requests_total{status=~"5.."}[5m]))
+          / sum by(job) (rate(http_requests_total[5m]))
+
+  # ── Alert rules ──────────────────────────────────────────────────────────────
+  - name: api_alerts
+    rules:
+
+      # 1. Symptôme métier — service down
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+          env: demo
+        annotations:
+          summary: "API demo indisponible"
+          description: "Le service {{ $labels.job }} ({{ $labels.instance }}) est DOWN depuis plus d'1 minute."
+          runbook_url: "http://localhost:3001/d/api-n1?orgId=1"
+
+      # 2. Symptôme métier — taux d'erreurs 5xx
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{job="api", status=~"5.."}[5m]))
+          / sum(rate(http_requests_total{job="api"}[5m])) > 0.005
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+          env: demo
+        annotations:
+          summary: "Taux d'erreurs 5xx élevé sur l'API"
+          description: "Taux d'erreur actuel : {{ $value | humanizePercentage }}. SLO = 99,5% de succès."
+          runbook_url: "http://localhost:3001/d/api-n2?orgId=1"
+
+      # 3. Symptôme métier — latence p95
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by(le) (rate(http_request_duration_seconds_bucket{job="api"}[5m]))
+          ) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          service: api
+          env: demo
+        annotations:
+          summary: "Latence p95 API au-dessus de 500ms"
+          description: "p95 actuel : {{ $value | humanizeDuration }}. SLO = p95 < 500ms."
+          runbook_url: "http://localhost:3001/d/api-n2?orgId=1"
+
+      # 4. Saturation — CPU élevé
+      - alert: HighCPU
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: node
+          env: demo
+        annotations:
+          summary: "CPU élevé sur {{ $labels.instance }}"
+          description: "CPU usage : {{ $value | humanize }}%. Seuil = 80%."
+          runbook_url: "http://localhost:3001/d/api-n2?orgId=1"
+
+      # 5. Saturation — RAM faible
+      - alert: LowMemory
+        expr: |
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+          service: node
+          env: demo
+        annotations:
+          summary: "Mémoire disponible faible sur {{ $labels.instance }}"
+          description: "Mémoire disponible : {{ $value | humanize }}%. Seuil minimum = 10%."
+          runbook_url: "http://localhost:3001/d/api-n2?orgId=1"
+
+      # 6. Qualité de collecte — target down (toute target)
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: warning
+          service: "{{ $labels.job }}"
+          env: demo
+        annotations:
+          summary: "Target Prometheus down : {{ $labels.job }}"
+          description: "La target {{ $labels.instance }} (job={{ $labels.job }}) ne répond plus au scrape."
+          runbook_url: "http://localhost:3001/d/api-n1?orgId=1"

@@ -1,0 +1,29 @@
+route:
+  receiver: "null"
+  group_by: ["alertname", "severity", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    - match:
+        severity: critical
+      receiver: "null"
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - match:
+        severity: warning
+      receiver: "null"
+      repeat_interval: 4h
+
+receivers:
+  - name: "null"
+
+inhibit_rules:
+  # Si ApiDown est firing, inhiber HighErrorRate et HighLatencyP95 pour le même service
+  - source_match:
+      alertname: ApiDown
+    target_match_re:
+      alertname: "HighErrorRate|HighLatencyP95"
+    equal: ["service", "env"]
