@@ -1,5 +1,10 @@
 # Supervision Prometheus + Grafana — API Demo
 
+**Groupe M1 DEV 25/26**
+- STEICHEN Lucas
+- SANCHEZ Cédric
+- SOLTAN MOHAMMADI Reza
+
 Stack de supervision opérationnelle construite pour le projet M1 DEV EPSI 25/26.  
 Elle répond en temps réel aux questions : service UP ? taux d'erreur ? latence ? saturation ?
 
