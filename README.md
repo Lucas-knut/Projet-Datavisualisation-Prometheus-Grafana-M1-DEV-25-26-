@@ -19,7 +19,7 @@ Elle répond en temps réel aux questions : service UP ? taux d'erreur ? latence
 ```bash
 # Cloner le repo
 git clone <url-du-repo>
-cd data_visualisation
+cd <nom-du-dossier>
 
 # Construire et démarrer tous les services
 docker compose up -d --build
@@ -54,18 +54,23 @@ docker compose down -v
 ## Simuler du trafic
 
 ```bash
-# Trafic normal continu (fond)
+# Trafic normal continu (fond) — Ctrl+C pour arrêter
 ./scripts/load_test.sh normal
 
-# Scénario de pic d'erreurs (déclenche l'alerte HighErrorRate)
+# Scénario de pic d'erreurs (déclenche l'alerte HighErrorRate) — s'arrête tout seul
 ./scripts/load_test.sh errors
 
-# Scénario de latence élevée (déclenche HighLatencyP95)
+# Scénario de latence élevée (déclenche HighLatencyP95) — s'arrête tout seul
 ./scripts/load_test.sh slow
 
-# Tout à la fois
+# Tout à la fois — Ctrl+C pour arrêter
 ./scripts/load_test.sh all
 ```
+
+> **Après avoir lancé un script**, vérifier dans cet ordre :
+> 1. http://localhost:9090/alerts — l'alerte apparaît d'abord en `pending`
+> 2. Attendre le délai (HighErrorRate = 2 min, HighLatencyP95 = 3 min, ApiDown = 1 min)
+> 3. http://localhost:9093 — l'alerte passe en `firing` et apparaît ici
 
 ---
 
@@ -283,22 +288,27 @@ Voir `docs/loki-logql.md` pour les requêtes documentées et les cas d'usage.
 ### Scénario 1 — Pic d'erreurs (viole le SLO taux de succès)
 
 ```bash
-# Bombarder l'endpoint /error (~30% de 500)
-for i in $(seq 1 200); do curl -s http://localhost:8000/error > /dev/null; done
+./scripts/load_test.sh errors
 ```
 
-Observation : dans ~2 min, l'alerte `HighErrorRate` passe en **firing** dans Alertmanager et dans le panel N1.  
-Diagnostic : aller sur N2 → "Erreurs 5xx par endpoint" → identifier `/error` → consulter les logs Loki.
+Observation :
+1. http://localhost:9090/alerts → `HighErrorRate` passe de `pending` à `firing` en ~2 min
+2. http://localhost:9093 → l'alerte apparaît avec le taux d'erreur mesuré
+3. http://localhost:3001/d/api-n1 → le panneau "Taux erreurs 5xx" vire au rouge
+
+Diagnostic : http://localhost:3001/d/api-n2 → "Erreurs 5xx par endpoint" → identifier `/error` → panel Logs Loki en bas de page.
 
 ### Scénario 2 — Latence élevée (viole le SLO p95)
 
 ```bash
-# Bombarder l'endpoint /slow (300ms-1200ms)
-for i in $(seq 1 50); do curl -s http://localhost:8000/slow & done; wait
+./scripts/load_test.sh slow
 ```
 
-Observation : la courbe p95 du N1 dépasse 500ms → alerte `HighLatencyP95` après 3 min.  
-Diagnostic : N2 → "Latence p95 par endpoint" → identifier `/slow`.
+Observation :
+1. http://localhost:9090/alerts → `HighLatencyP95` passe en `firing` en ~3 min
+2. http://localhost:3001/d/api-n1 → la courbe p95 dépasse 500ms
+
+Diagnostic : http://localhost:3001/d/api-n2 → "Latence p95 par endpoint" → identifier `/slow`.
 
 ### Scénario 3 — Service down
 
@@ -306,7 +316,10 @@ Diagnostic : N2 → "Latence p95 par endpoint" → identifier `/slow`.
 docker compose stop api
 ```
 
-Observation : `ApiDown` fire en 1 min. `HighErrorRate` et `HighLatencyP95` sont inhibées automatiquement.
+Observation :
+1. http://localhost:9090/alerts → `ApiDown` fire en ~1 min, `HighErrorRate` et `HighLatencyP95` sont **inhibées** automatiquement
+2. http://localhost:9093 → seul `ApiDown` apparaît (pas de bruit parasite)
+3. http://localhost:3001/d/api-n1 → le panneau "Service UP ?" passe en rouge
 
 ```bash
 docker compose start api   # rétablissement
